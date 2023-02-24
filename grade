@@ -1,25 +1,27 @@
 #!/bin/python
 
 import os.path
-import re
 import sys
+import re
 import subprocess as subp
 
-passBoardMsg = "Thread $x: Wooh! I’m about to ride the roller coaster for the (?:(?:(?:[1-9]|(?:[1-9]+0))*1 st)|(?:(?:[1-9]|(?:[1-9]+0))*2 nd)|(?:(?:[1-9]|(?:[1-9]+0))*3 rd)|(?:(?:[1-9]|(?:[1-9]+0))*[4-9] th)) time! I have (?:[1-9]|(?:[1-9]+0))*[1-9]{1}( |\n){1}iterations left\\.\\n"
-passExitMsg = "Thread $x: Completed (?:[1-9]|([1-9]+0))*[1-9]{1} iterations on the roller coaster\\. Exiting\\.\\n"
-rideBeginMsg = "Car: (?:[1-9]|(?:[1-9]+0))*[0-9]{1} passengers are riding the roller coaster\\. Off we go on the (?:[1-9]|(?:[1-9]+0))*[1-9]{1} ride!\\n"
-rideCompleteMsg = "Car:  ride (?:[1-9]|(?:[1-9]+0))*[1-9]{1} completed\\.\\n"
-progExit = "Car: Roller coaster shutting down\\.\\n"
-# </editor-fold>
+passBoardMsg = "Thread $x: Wooh! I’m about to ride the roller coaster for the (?:(?:(?:[1-9]|(?:[1-9]+0))*1 st)|(?:(?:[1-9]|(?:[1-9]+0))*2 nd)|(?:(?:[1-9]|(?:[1-9]+0))*3 rd)|(?:(?:[1-9]|(?:[1-9]+0))*[4-9] th)) time! I have (?:[1-9]|(?:[1-9]+0))*[1-9]{1}( |\\n){1}iterations left\\."
+passExitMsg = "Thread $x: Completed (?:[1-9]|([1-9]+0))*[1-9]{1} iterations on the roller coaster\\. Exiting\\."
+rideBeginMsg = "Car: (?:[1-9]|(?:[1-9]+0))*[0-9]{1} passengers are riding the roller coaster\\. Off we go on the (?:[1-9]|(?:[1-9]+0))*[1-9]{1} ride!"
+rideCompleteMsg = "Car:  ride (?:[1-9]|(?:[1-9]+0))*[1-9]{1} completed\\."
+progExit = "Car: Roller coaster shutting down\\."
+
 
 # finds all matching strings according to @refPattern
 def getOutput(refPattern: str, outp: str):
-    return re.findall(refPattern, outp, re.IGNORECASE)
+    return re.findall(refPattern, outp, flags=re.IGNORECASE)
+
 
 argc = len(sys.argv)
 if argc < 2:
     print("Usage: ./grade <filename (txt or exe)> <# n> <# c> <# i>")
     exit(1)
+
 filename = sys.argv[1]  # this script will run the provided named
 n = int(sys.argv[2])
 c = int(sys.argv[3])
@@ -40,35 +42,34 @@ else:
     exit(1)
 
 try:
-
     pout = ""
     if isExec:
         pout = subp.check_output(args, shell=True, text=True)
     else:
-        pout = open(filename, "r").readlines()
-
-    print(pout)
-    exit(0)
-
-    rideLim = (n * i) / c + i  # n*i "people" to serve, with c seats, therefore (n*i)/c rides,
+        pout = "".join(open(filename, "r").readlines())
+    # print(pout)
+    # print(getOutput(passBoardMsg.replace("$x", str(0)), pout))
+    # exit(0)
+    rideLim = int((n * i) / c + i)  # n*i "people" to serve, with c seats, therefore (n*i)/c rides,
     # + i for the average amt of times it runs < than c
-
     rideBeginMsgs = list()
+    ridebeginMsgsCnt = 0
     rideCompleteMsgs = list()
-
-
+    rideCompleteMsgsCnt = 0
     for x in range(n + 1):
+
         rideBeginMsgs.append(list(set(getOutput(passBoardMsg.replace("$x", str(x)), pout))))  # count times began
-        if not (0 < len(rideBeginMsgs[x]) < rideLim):
-            print("Invalid amount of rides possible.")
-            exit(1)
-
+        ridebeginMsgsCnt += len(rideBeginMsgs[x])
         rideCompleteMsgs.append(list(set(getOutput(passExitMsg.replace("$x", str(x)), pout))))  # count times end
-        if len(rideBeginMsgs) != len(rideCompleteMsgs):
-            print("Unequal amount of rides to completions.")
-            exit(1)
+        rideCompleteMsgsCnt += len(rideCompleteMsgs[x])
 
+    if not (1 < ridebeginMsgsCnt < rideLim):
+        print("Invalid amount of rides possible.")
+        exit(1)
 
+    if ridebeginMsgsCnt != rideCompleteMsgsCnt:
+        print("Unequal amount of rides to completions.")
+        exit(1)
 
     if len(getOutput(progExit, pout)) != 1:
         print("No end message found :/")

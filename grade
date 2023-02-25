@@ -5,16 +5,21 @@ import sys
 import re
 import subprocess as subp
 
-passBoardMsg = "Thread $x: Wooh! I’m about to ride the roller coaster for the (?:(?:(?:[1-9]|(?:[1-9]+0))*1 st)|(?:(?:[1-9]|(?:[1-9]+0))*2 nd)|(?:(?:[1-9]|(?:[1-9]+0))*3 rd)|(?:(?:[1-9]|(?:[1-9]+0))*[4-9] th)) time! I have (?:[1-9]|(?:[1-9]+0))*[1-9]{1}( |\\n){1}iterations left\\."
-passExitMsg = "Thread $x: Completed (?:[1-9]|([1-9]+0))*[1-9]{1} iterations on the roller coaster\\. Exiting\\."
-rideBeginMsg = "Car: (?:[1-9]|(?:[1-9]+0))*[0-9]{1} passengers are riding the roller coaster\\. Off we go on the (?:[1-9]|(?:[1-9]+0))*[1-9]{1} ride!"
-rideCompleteMsg = "Car:  ride (?:[1-9]|(?:[1-9]+0))*[1-9]{1} completed\\."
+passBoardMsg = "Thread $x: Wooh! I’m about to ride the roller coaster for the (?:(?:([1-9]|[1-9]+0)*1 st)|(?:(?:[1-9]|[1-9]+0)*2 nd)|(?:(?:[1-9]|[1-9]+0)*3 rd)|(?:(?:[1-9]|[1-9]+0)*[4-9] th)) time! I have (?:[1-9]|[1-9]+0)*[1-9] iterations left\\."
+passExitMsg = "hread $x: Completed (?:[1-9]|[1-9]+0)*[1-9] iterations? on the roller coaster\\. Exiting\\."
+rideBeginMsg = "Car: (?:[1-9]|[1-9]+0)*[0-9] passenger(?: is|s are) riding the roller coaster\\. Off we go on the (?:[1-9]|[1-9]+0)*[1-9] ride!"
+rideCompleteMsg = "Car:  ride (?:[1-9]|[1-9]+0)*[1-9]  completed\\."
 progExit = "Car: Roller coaster shutting down\\."
 
 
 # finds all matching strings according to @refPattern
 def getOutput(refPattern: str, outp: str):
     return re.findall(refPattern, outp, flags=re.IGNORECASE)
+
+def getNumIterations(exitStr: str):
+    print(exitStr)
+    sub = re.findall("(?:[1-9]|[1-9]+0)*[1-9] iterations", exitStr)
+    return int(sub[0][0:sub[0].index(" ")])
 
 
 argc = len(sys.argv)
@@ -33,7 +38,6 @@ if os.path.exists("./" + filename):
     filename = "./" + filename
     args = list([filename, "-n", str(n), "-c", str(c), "-i", str(i)])
     isExec = os.access(filename, os.X_OK)
-
 elif os.path.exists(filename):
     args = list([filename, "-n", str(n), "-c", str(c), "-i", str(i)])
     isExec = os.access(filename, os.X_OK)
@@ -47,32 +51,51 @@ try:
         pout = subp.check_output(args, shell=True, text=True)
     else:
         pout = "".join(open(filename, "r").readlines())
-    # print(pout)
-    # print(getOutput(passBoardMsg.replace("$x", str(0)), pout))
-    # exit(0)
-    rideLim = int((n * i) / c + i)  # n*i "people" to serve, with c seats, therefore (n*i)/c rides,
+
+    rideLim = 0
+    if n * 1 % c == 0:
+        rideLim = int(((n * i) / c))
+    else:
+        rideLim = int(((n * i) / c) + 1)
+    # n*i "people" to serve, with c seats, therefore (n*i)/c rides,
     # + i for the average amt of times it runs < than c
-    rideBeginMsgs = list()
-    ridebeginMsgsCnt = 0
-    rideCompleteMsgs = list()
-    rideCompleteMsgsCnt = 0
+    passBoardMsgs = list()
+    passCompleteMsgs = list()
+
     for x in range(n + 1):
+        passCompleteMsgs.append(getOutput(passExitMsg.replace("$x", str(x)), pout))  # count exit times
+        if len(passCompleteMsgs[x]) > 1:
+            print("Passenger", x, "exited more than once!")
+            exit(1)
 
-        rideBeginMsgs.append(list(set(getOutput(passBoardMsg.replace("$x", str(x)), pout))))  # count times began
-        ridebeginMsgsCnt += len(rideBeginMsgs[x])
-        rideCompleteMsgs.append(list(set(getOutput(passExitMsg.replace("$x", str(x)), pout))))  # count times end
-        rideCompleteMsgsCnt += len(rideCompleteMsgs[x])
+        numIterations = getNumIterations(passCompleteMsgs[x][0])  # should only be 1 of these, should return the choice from the random variable (0, i)
+        passBoardMsgs.append(list(set(getOutput(passBoardMsg.replace("$x", str(x)), pout))))  # Matches all times the passenger gets on the coaster
 
-    if not (1 < ridebeginMsgsCnt < rideLim):
+        if len(passBoardMsgs[x]) != numIterations:
+            print(passBoardMsgs[x])
+            print("Passenger", x, "did not run", numIterations, "iterations.")
+            exit(1)
+
+    rBegCnt = len(getOutput(rideBeginMsg, pout))
+    if not (0 <= rBegCnt <= rideLim):
         print("Invalid amount of rides possible.")
         exit(1)
 
-    if ridebeginMsgsCnt != rideCompleteMsgsCnt:
-        print("Unequal amount of rides to completions.")
+    rEndCnt = len(getOutput(rideCompleteMsg, pout))
+    if rBegCnt > rEndCnt:
+        print("The ride never stopped with passengers on it!")
+        exit(1)
+    elif rBegCnt < rEndCnt:
+        print("The ride ended before it began!")
+        exit(1)
+
+    pExitCnt = len(passCompleteMsgs)
+    if pExitCnt != n:
+        print("A passenger never left the park!")
         exit(1)
 
     if len(getOutput(progExit, pout)) != 1:
-        print("No end message found :/")
+        print("The ride never shutdown!")
         exit(1)
 
 

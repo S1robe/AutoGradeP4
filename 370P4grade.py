@@ -11,7 +11,7 @@ rideBCorrectMsg = "Car: {pNum} {cPass} riding the roller coaster. Off we go on t
 rideCCorrectMsg = "Car: ride {rNum} completed."
 progECorrect = "Car: Roller coaster shutting down."
 
-passBoardMsg = "(Thread $x: Wooh! I.m about to ride the roller coaster for the (?:(?:([1-9]|[1-9]+[0-9]*0)*1 ?st)|(?:(?:[1-9]|[1-9]+[0-9]*0)*2 ?nd)|(?:(?:[1-9]|[1-9]+[0-9]*0)*3 ?rd)|(?:(?:[1-9]|[1-9]+[0-9]*0)*[4-9] ?th)) time! I have (?:[1-9]|[1-9]+[0-9]*0)*[1-9] iterations left\\.)"
+passBoardMsg = "(Thread $x: Wooh! I.m about to ride the roller coaster for the (?:(?:(?:[1-9]|[1-9]+[0-9]*0)*1 ?st)|(?:(?:[1-9]|[1-9]+[0-9]*0)*2 ?nd)|(?:(?:[1-9]|[1-9]+[0-9]*0)*3 ?rd)|(?:(?:[1-9]|[1-9]+[0-9]*0)*[4-9] ?th)) time! I have (?:[1-9]|[1-9]+[0-9]*0)*[1-9] iterations left\\.)"
 passExitMsg = "(hread $x: Completed (?:[1-9]|[1-9]+[0-9]*0)*[1-9] iterations? on the roller coaster\\. Exiting\\.)"
 rideBeginMsg = "(Car: (?:[1-9]|[1-9]+[0-9]*0)*[0-9] passenger(?: is|s are) riding the roller coaster\\. Off we go on the (?:[1-9]|[1-9]+[0-9]*0)*[1-9] ride!)"
 rideCompleteMsg = "(Car:  ?ride (?:[1-9]|[1-9]+[0-9]*0)*[1-9]  ?completed\\.)"
@@ -30,9 +30,9 @@ progEMsg = list()
 def handleBadThreads(tNum: int, errTypes: list):
     for e in errTypes:
         if e == 1:
-            fixOutput(pout, passBoardMsgs[tNum], 1, tNum, numIterations[tNum])
+            fixOutput(pout, passBoardMsgs[tNum], msg=1, theNum=tNum, eIter=numIterations[tNum])
         else:
-            fixOutput(pout, passCompleteMsgs[tNum], 2, tNum, "#")
+            fixOutput(pout, passCompleteMsgs[tNum], msg=2, theNum=tNum, eIter="#")
 
 
 def fixOutput(badoutput: str, good: list, msg: int, theNum: int, eIter):
@@ -46,16 +46,17 @@ def fixOutput(badoutput: str, good: list, msg: int, theNum: int, eIter):
 
         badStrings = set(badStrings)
         badStrings.difference_update(set(good))  # remove good ones from the found ones
+
         badStrings = list(badStrings)  # should only be the bad strings
         neededIters = []
-
         foundIters = re.findall("((?:[1-9]|[1-9]+[0-9]*0)*[1-9]) iterations", "".join(good))
         if len(foundIters) == 0:  # no iterations printed
-            for e in range(eIter+1):
-                neededIters.append(e)
+            if eIter != "(#)":
+                for e in range(eIter+1):
+                    neededIters.append(e)
 
 
-        for st in badStrings:
+        for st in sorted(badStrings):
             teNum = re.findall(".*((?:[1-9]|[1-9]+[0-9]*0)*[1-9]) (?:st|nd|rd|th).*", st)
             if len(teNum) == 0:
                 teNum = "(#) (st|nd|rd|th)"
@@ -63,7 +64,11 @@ def fixOutput(badoutput: str, good: list, msg: int, theNum: int, eIter):
                 teNum = int(teNum[0])
                 teNum = "{x} {ord}".format(x=teNum, ord=ordinals[teNum % 10])
 
-            eyeNum = neededIters.pop()
+            if len(neededIters) != 0:
+                eyeNum = neededIters.pop()
+            else:
+                eyeNum = "(#)"
+
             correctOut = passBCorrectMsg.format(thNum=theNum, iNum=eyeNum, tNum=teNum)
 
             print("Expected: ", correctOut, "\nGot:     ", st)
@@ -77,23 +82,26 @@ def fixOutput(badoutput: str, good: list, msg: int, theNum: int, eIter):
         badStrings = set(badStrings)
         badStrings.difference_update(good)  # remove good ones from the found ones
         badStrings = list(badStrings)  # should only be the bad strings
-        for st in badStrings:
+
+
+        for st in sorted(badStrings):
             eyeNum = re.findall("((?:[1-9]|[1-9]+[0-9]*0)*[1-9]) iterations", st)
             if len(eyeNum) != 0:
                 correctOut = passECorrectMsg.format(thNum=theNum, iNum=eyeNum[0])
             else:
                 correctOut = passECorrectMsg.format(thNum=theNum, iNum=eIter)
             print("Expected: ", correctOut, "\nGot:     ", st)
-    elif msg == 3:  # fix the Ride begin messages
-        badStrings = re.findall("(.*passenger.*)".format(x=theNum), badoutput)  # get all strings that have this
+    elif msg == 3:
+        badStrings = re.findall("(Car.*passenger.*!)".format(x=theNum), badoutput)  # get all strings that have this
         if len(badStrings) == 0:
             print("Missing \"passenger!\" in one or more Car begin messages")
             print("Expecting something like: ",
                   rideBCorrectMsg.format(pNum="(#)", cPass="passenger(s are| is)", rNum="(#)"))
             return
         badStrings = set(badStrings)
-        badStrings.difference_update(good)  # remove good ones from the found ones
+        badStrings.difference_update(set(good))  # remove good ones from the found ones
         badStrings = list(badStrings)  # should only be the bad strings
+
         for st in badStrings:
             pNum = re.findall("Car: ((?:[1-9]|[1-9]+[0-9]*0)*[0-9])", badoutput)
             cPass = "passenger"
@@ -113,7 +121,45 @@ def fixOutput(badoutput: str, good: list, msg: int, theNum: int, eIter):
                 rNum = int(rNum[0])
 
             correctOut = rideBCorrectMsg.format(pNum=pNum, cPass=cPass, rNum=rNum)
-            print("Expected: ", correctOut, "\nGot:     ", st)
+            print("Expected: ", correctOut, "\nGot:      ", st)
+
+    elif msg == 4:  # fix the Ride begin messages
+        badStrings = re.findall("(Car.*passenger.*!)".format(x=theNum), badoutput)  # get all strings that have this
+        if len(badStrings) == 0:
+            print("Missing \"passenger!\" in one or more Car begin messages")
+            print("Expecting something like: ",
+                  rideBCorrectMsg.format(pNum="(#)", cPass="passenger(s are| is)", rNum="(#)"))
+            return
+        badStrings = set(badStrings)
+        badStrings.difference_update(set(good))  # remove good ones from the found ones
+        badStrings = list(badStrings)  # should only be the bad strings
+
+        if len(badStrings) == 0:
+            foundRides = sorted(re.findall("Car: ((?:[1-9]|[1-9]+[0-9]*0)*[0-9])", "".join(good)))
+            print(max(foundRides))
+            # go thru the max
+
+
+        for st in badStrings:
+            pNum = re.findall("Car: ((?:[1-9]|[1-9]+[0-9]*0)*[0-9])", badoutput)
+            cPass = "passenger"
+            if len(pNum) == 0:
+                cPass = "(#) passenger(s are| is)"
+            else:
+                pNum = int(pNum[0])
+                if pNum == 1:
+                    cPass = "passenger is"
+                else:
+                    cPass = "passengers are"
+
+            rNum = re.findall("((?:[1-9]|[1-9]+[0-9]*0)*[1-9]) ride!", st)
+            if len(rNum) == 0:
+                rNum = "(#)"
+            else:
+                rNum = int(rNum[0])
+
+            correctOut = rideBCorrectMsg.format(pNum=pNum, cPass=cPass, rNum=rNum)
+            print("Expected: ", correctOut, "\nGot:      ", st)
 
 
 def pretty(top: list, bot: list):
@@ -191,9 +237,8 @@ try:
 
         if x >= len(numIterations):
             numIterations[x] = "(#)"
-        if len(passCompleteMsgs) != 0:
-            numIterations[x] = getNumIterations(
-                passCompleteMsgs[x][0])  # Returns the choice from the random variable (0, i)
+        if len(passCompleteMsgs[x]) != 0:
+            numIterations[x] = getNumIterations(passCompleteMsgs[x][0])  # Returns the choice from the random variable (0, i)
 
         good = getOutput(passBoardMsg.replace("$x", str(x)), pout)
         passBoardMsgs[x] = good  # Matches all times the passenger gets on the coaster
@@ -203,7 +248,7 @@ try:
                 badThreads.append(x)
                 errorTypes[x] = [1]
             else:
-                errorTypes[x] = [1, 2]
+                errorTypes[x] = [2, 1]
 
     for t in badThreads:
         print("\nIssues with Passenger:", t, "-----")
@@ -212,22 +257,19 @@ try:
 
     rBegCnt = len(rBegMsgs)
     if not (0 <= rBegCnt <= rideLim):
-        fixOutput(pout, rBegMsgs, 3, 0, 0)
         print("Invalid amount of rides possible.\n", "Expected <= ", rideLim, "\nGot: ", rBegCnt)
         exit(1)
 
     rEndCnt = len(rEndMsgs)
     if rBegCnt > rEndCnt:
-        pretty(rBegMsgs, rEndMsgs)
+        fixOutput(pout, rEndMsgs, 3, 0, 0)
         print("A ride never stopped with passengers on it!")
         exit(1)
     elif rBegCnt < rEndCnt:
-        pretty(rBegMsgs, rEndMsgs)
-        print("A ride ended before it began!")
+        fixOutput(pout, rBegMsgs, 4, 0, 0)
         exit(1)
     if len(progEMsg) != 1:
-        print("Expected to find: \n", progECorrect, "\nGot: ", progEMsg)
-        # print("The ride never shutdown!")
+        print("Expected to find: \n", progECorrect, "\nGot:     ", progEMsg)
         exit(1)
 
     if len(badThreads) != 0:

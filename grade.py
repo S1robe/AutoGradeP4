@@ -1,0 +1,411 @@
+#!/bin/python
+
+import os.path
+import sys
+import re
+import subprocess as subp
+
+passBCorrectMsg = "Thread {thNum}: Wooh! I'm about to ride the roller coaster for the {tNum} time! I have {iNum} " \
+                  "iterations left."
+passECorrectMsg = "thread {thNum}: Completed {iNum} iterations on the roller coaster. Exiting."
+rideBCorrectMsg = "Car: {pNum} {cPass} riding the roller coaster. Off we go on the {rNum} ride!"
+rideCCorrectMsg = "Car: ride {rNum} completed."
+progECorrect = "Car: Roller coaster shutting down."
+
+passBoardMsg = "(Thread $x: Wooh! I.m about to ride the roller coaster for the (?:(?:(?:[1-9]|[1-9]+[0-9]*0)*1 ?st)|(" \
+               "?:(?:[1-9]|[1-9]+[0-9]*0)*2 ?nd)|(?:(?:[1-9]|[1-9]+[0-9]*0)*3 ?rd)|(?:(?:[1-9]|[1-9]+[0-9]*0)*[4-9] " \
+               "?th)) time! I have (?:[1-9]|[1-9]+[0-9]*0)*[0-9] iterations left\\.)"
+passExitMsg = "([Tt]hread $x: Completed (?:[1-9]|[1-9]+[0-9]*0)*[0-9] iterations? on the roller coaster\\. " \
+              "Exiting\\.)"
+rideBeginMsg = "(Car: (?:[1-9]|[1-9]+[0-9]*0)*[0-9] passenger(?: is|s are) riding the roller coaster\\. Off we go on " \
+               "the (?:[1-9]|[1-9]+[0-9]*0)*[0-9] ride!)"
+rideCompleteMsg = "(Car:  ?ride (?:[1-9]|[1-9]+[0-9]*0)*[0-9]  ?completed\\.)"
+progExit = "(Car: Roller coaster shutting down\\.)"
+
+ordinals = {0: "th", 1: "st", 2: "nd", 3: "rd", 4: "th", 5: "th", 6: "th", 7: "th", 8: "th", 9: "th"}
+numIterations = {int: int}
+passBoardMsgs = {int: list}
+passCompleteMsgs = {int: list}
+rBegMsgs = list()
+rEndMsgs = list()
+progEMsg = list()
+pout = 0
+
+
+# Checks the output of the car to make sure that its valid, otherwise reports issues
+# with the car's output
+def fixCarOut():
+    # False by default
+    bad = False
+
+    # find the messages that begin with C and end with !
+    badStrtStrings = re.findall("(C.*!)", pout)  # get all strings that have this
+    # find the messages that begin with Car: and end with a period
+    badEndStrings = re.findall("(Car:  ?ride.*\\.)", pout)
+
+    badStrtStrings = set(badStrtStrings)
+    badStrtStrings.difference_update(set(rBegMsgs))  # remove good ones from the found ones
+    badStrtStrings = list(badStrtStrings)  # should only be the bad strings
+
+    badEndStrings = set(badEndStrings)
+    badEndStrings.difference_update(set(rEndMsgs))  # remove good ones from the found ones
+    badEndStrings = list(badEndStrings)  # should only be the bad strings
+    # Attempt to find all ride beginning numbers/messages from the "good" ones
+    foundRides = list(map(int, sorted(re.findall("((?:[1-9]|[1-9]+[0-9]*0)*[0-9]) ride", "".join(rBegMsgs)))))
+    # Attempt ot find all ride end numbers/messages from the "good" ones
+    foundEndRides = list(map(int, sorted(re.findall("ride ((?:[1-9]|[1-9]+[0-9]*0)*[0-9])", "".join(rEndMsgs)))))
+
+    limit = 0
+    # if we found ride #'s
+    if len(foundRides) != 0 and len(foundEndRides) != 0:
+        limit = max(max(foundRides), max(foundEndRides))  # the largest of the two is our limit
+    elif len(foundRides) == 0 and len(foundEndRides) != 0:  # otherwise take the largest of what we have
+        limit = max(foundEndRides)
+    elif len(foundRides) != 0 and len(foundEndRides) == 0:
+        limit = max(foundRides)
+
+    # for all ride numbers (sequential, so we should have them all)
+    for e in range(1, limit + 1):
+        # if we don't have it in foundRides (Off we go on the (#) ride!)
+        if e not in foundRides:
+            bad = True
+            thisride = []
+            for st in badStrtStrings:
+                thisride = re.findall("(.*{e}.....!)".format(e=e), st)
+                if len(thisride) == 1:
+                    break
+
+            if len(thisride) == 1:
+                print("Expected:", rideBCorrectMsg.format(pNum="(#)", cPass="passenger(s are| is)", rNum=e),
+                      "\nGot:     ", thisride[0])
+            else:
+                print("Missing:", rideBCorrectMsg.format(pNum="(#)", cPass="passenger(s are| is)", rNum=e))
+
+        # if we don't have it in the End of the ride (Car: ride (#) completed.)
+        if e not in foundEndRides:
+            bad = True
+            thatride = []
+            for st in badEndStrings:
+                thatride = re.findall("(.*{e}.*)".format(e=e), st)
+                if len(thatride) == 1:
+                    break
+            if len(thatride) == 1:
+                print("Expected:", rideCCorrectMsg.format(rNum=e),
+                      "\nGot:     ", thatride[0])
+            else:
+                print("Missing:", rideCCorrectMsg.format(rNum=e))
+
+    needed = set(foundRides)
+    needed.difference_update(set(foundEndRides))
+    needed = list(needed)
+
+    # If we were able to find the ride numbers, but the messages are malformed
+    for st in badStrtStrings:
+        bad = True
+        # attempt to find the number you provided if it's right
+        rNum = re.findall("((?:[1-9]|[1-9]+[0-9]*0)*[0-9]).....!", st)
+        if len(rNum) == 0:
+            if len(needed) == 0:
+                rNum = "(#)"
+            else:
+                rNum = needed.pop()
+        else:
+            rNum = rNum[0]
+
+        # attempt to find the number you provided
+        pNum = re.findall(":.((?:[1-9]|[1-9]+[0-9]*0)*[0-9])", st)
+        if len(pNum) == 0:
+            pNum = "(#)"
+        else:
+            pNum = pNum[0]
+
+        # attempt to find the formatting you used.
+        cPass = re.findall(" (?:[1-9]|[1-9]+[0-9]*0)*[0-9] ( is|s are) ", st)
+        if len(cPass) == 0:
+            cPass = "passenger(is |s are)"
+        else:
+            cPass = cPass[0]
+
+        print("Expected:", rideBCorrectMsg.format(pNum=pNum, cPass=cPass, rNum=rNum),
+              "\nGot     :", st)
+
+    # same as before, if we found the number, but the message wasn't formatted correctly
+    for st in badEndStrings:
+        bad = True
+        # find the number in this message.
+        rNum = re.findall("ride ((?:[1-9]|[1-9]+[0-9]*0)*[0-9])", st)
+        if len(rNum) == 0:
+            if len(needed) == 0:
+                rNum = "(#)"
+            else:
+                rNum = needed.pop()
+        else:
+            rNum = rNum[0]
+
+        print("Expected:", rideCCorrectMsg.format(rNum=rNum),
+              "\nGot     :", st)
+
+    return bad
+
+
+# Provide feedback about passenger output
+def fixPassOut(threadNumber, expectedIterations):
+    bad = False
+    # --------------------------- Passenger Boarding ----------------------------------------------
+    # Attempts to find all Thread $x: Wooh! strings.
+    badStrings = re.findall("(T.*{x}:.*W.*\\.)".format(x=threadNumber), pout)
+
+    badStrings = set(badStrings)
+    badStrings.difference_update(set(passBoardMsgs[threadNumber]))  # remove good ones from the found ones
+    badStrings = list(badStrings)  # should only be the bad strings
+
+    if len(badStrings) == 0:
+        foundIters = list(map(int, re.findall("((?:[1-9]|[1-9]+[0-9]*0)*[0-9]).?(?:st|nd|rd|th)",
+                                              "".join(passBoardMsgs[threadNumber]))))  # find did right
+        foundItersLeft = list(map(int, re.findall("((?:[1-9]|[1-9]+[0-9]*0)*[1-9]).?i",
+                                                  "".join(passBoardMsgs[threadNumber]))))
+
+        def printNotFound():
+            for it in range(1, expectedIterations + 1):
+                if it not in foundIters:
+                    teeNum = "{x}{ord}".format(x=e, ord=ordinals[it % 10])
+                    print("Missing:",
+                          passBCorrectMsg.format(thNum=threadNumber, tNum=teeNum,
+                                                 iNum=(expectedIterations - it) + 1))
+
+        # if we found both
+        if len(foundIters) != 0 and len(foundItersLeft) != 0:
+            # then we must check
+            if len(foundIters) == foundIters[0] + (foundItersLeft[0] - 1):
+                # if we can trust expected iterations
+                if expectedIterations != "(#)":
+                    bad = True
+                    printNotFound()
+                else:
+                    bad = True
+                    print("Missing Passenger boarding!")
+                    print("Expecting:", passBCorrectMsg.format(thNum=threadNumber, tNum="(#)(st|nd|rd|th)", iNum="(#)"))
+            else:
+                bad = True
+                # if we cant trust expected iterations, because their missing too many numbers
+                numIterations[threadNumber] = foundIters[0] + (foundItersLeft[0] - 1)  # attempt to fix it
+                expectedIterations = numIterations[threadNumber]
+                printNotFound()
+
+        elif len(passCompleteMsgs[threadNumber]) != 0:
+            for e in range(1, expectedIterations + 1):
+                teNum = "{x}{ord}".format(x=e, ord=ordinals[e % 10])
+                bad = True
+                print("Missing:",
+                      passBCorrectMsg.format(thNum=threadNumber, tNum=teNum,
+                                             iNum=(expectedIterations - e) + 1))
+        else:
+            bad = True
+            print("Missing:", passBCorrectMsg.format(thNum=threadNumber, tNum="(#)(st|nd|rd|th)", iNum="(#)"))
+
+    for st in sorted(badStrings):
+        bad = True
+        # tries to find the number in (#) st/nd/rd/th time....
+        foundIters = list(map(int, re.findall("((?:[1-9]|[1-9]+[0-9]*0)*[0-9]).?(?:st|nd|rd|th)", st)))
+        # tries to find the (#) from "I have (#) iterate......
+        foundItersLeft = list(map(int, re.findall("((?:[1-9]|[1-9]+[0-9]*0)*[1-9]).?i", st)))
+
+        if len(foundIters) == 0:  # if we didn't find any number from the "st/nd/rd.. time....."
+            if len(foundItersLeft) == 0:  # if we didn't find any number from the " (#) iterations left..."
+                teNum = "(#)(st|nd|rd|th)"
+            else:
+                teNum = foundItersLeft[0]  # only will be found/used, if more than one we use the first
+        else:
+            teNum = foundIters[0]
+
+        #  expected iterations is only (#) when we cant find it through normal means
+        # i.e. from any of the boarding messages, or the exit message
+        if expectedIterations != "(#)" and (type(teNum) is int):
+            eyeNum = expectedIterations - teNum + 1
+        else:
+            eyeNum = "(#)"
+
+        # iff teNum is found (not a string)
+        if type(teNum) is int:
+            teNum = "{x}{ord}".format(x=teNum, ord=ordinals[teNum % 10])
+
+        correctOut = passBCorrectMsg.format(thNum=threadNumber, iNum=eyeNum, tNum=teNum)
+        print("Expected:", correctOut, "\nGot:     ", st)
+
+    return bad
+
+
+# Provide feedback about passenger exit output
+def fixPassEndOut(threadNumber, expectedIterations):
+    bad = False
+    # --------------------------- Passenger Exiting ---------------------------------
+    # Attempts to find all thread $x:...Exiting strings.
+    badStrings = re.findall("([Tt].*{x}:.*Completed.*\\.)".format(x=threadNumber),
+                            pout)  # get all strings that have this
+
+    # Special case, if we are missing the exit message, and didn't find badStrings,
+    # the program being in this function implies that something wasn't found.
+    if len(passCompleteMsgs[threadNumber]) == 0 and len(badStrings) == 0:
+        bad = True
+        print("Passenger", threadNumber, "did not \"Complete\"")
+        # if we found iterations, but it's not equal to our complete message "... completed (#) iterations... Exiting"
+        if expectedIterations != "(#)" and expectedIterations != len(passCompleteMsgs[threadNumber]):
+            print("Expecting: ",
+                  passECorrectMsg.format(thNum=threadNumber, iNum=expectedIterations))
+        # iff we couldn't find anything
+        else:
+            print("Expecting: ",
+                  passECorrectMsg.format(thNum=threadNumber, iNum="(#)"))
+
+    badStrings = set(badStrings)
+    badStrings.difference_update(passCompleteMsgs[threadNumber])  # remove good ones from the found ones
+    badStrings = list(badStrings)  # should only be the bad strings
+
+    for st in sorted(badStrings):
+        bad = True
+        #  find the numbers in
+        eyeNum = re.findall("((?:[1-9]|[1-9]+[0-9]*0)*[1-9]) i", st)
+        if len(eyeNum) != 0:
+            correctOut = passECorrectMsg.format(thNum=threadNumber, iNum=eyeNum[0])
+        else:
+            correctOut = passECorrectMsg.format(thNum=threadNumber, iNum=expectedIterations)
+        print("Expected:", correctOut, "\nGot:     ", st)
+
+    return bad
+
+
+# Just stacks output messages
+def pretty(top: list, bot: list):
+    longer = max(len(top), len(bot))
+    for e in range(longer):
+        if e < len(top):
+            print(top[e])
+        if e < len(bot):
+            print(bot[e])
+
+
+# finds all matching strings according to @refPattern
+def getOutput(refPattern: str, output: str):
+    return re.findall(refPattern, output, flags=re.IGNORECASE)
+
+
+# attempt to extract iterations from the exit strings
+def getIterNorm(string: str):
+    sub = re.findall("((?:[1-9]|[1-9]+[0-9]*0)*[0-9]) iterations", string)
+    return int(sub[0])
+
+
+# Attempt to extract iterations from the (#)st/nd/rd/ ... time! .....
+def getIterSpec(string: str):
+    sub = re.findall("((?:[1-9]|[1-9]+[0-9]*0)*[0-9]).?(?:st|nd|rd|th)", string)
+    return int(sub[0])
+
+
+argc = len(sys.argv)
+if argc < 2:
+    print("Usage: ./grade <filename (txt or exe)> <# n> <# c> <# i>")
+    exit(1)
+
+filename = sys.argv[1]  # this script will run the provided named
+n = int(sys.argv[2])
+c = int(sys.argv[3])
+i = int(sys.argv[4])
+
+if os.path.exists("./" + filename):
+    filename = "./" + filename
+elif os.path.exists(filename):
+    pass
+else:
+    print("Cant find ", filename)
+    exit(1)
+
+args = list([filename, "-n", str(n), "-c", str(c), "-i", str(i)])
+isExec = os.access(filename, os.X_OK)
+
+# try because subprocess might fault
+try:
+    if isExec:
+        # run the program with output checked, converted from binary to textual output
+        pout = subp.check_output(args, text=True)
+    else:
+        # open file for read, read lines
+        pout = "".join(open(filename, "r").readlines())
+
+    # globally assigned
+    rBegMsgs = getOutput(rideBeginMsg, pout)
+    rEndMsgs = getOutput(rideCompleteMsg, pout)
+    progEMsg = getOutput(progExit, pout)
+
+    # set of bad threads to check
+    badThreads = set()
+
+    for x in range(n):
+        numIterations[x] = "(#)"
+        passCompleteMsgs[x] = getOutput(passExitMsg.replace("$x", str(x)), pout)  # count exit times
+        passBoardMsgs[x] = getOutput(passBoardMsg.replace("$x", str(x)), pout)  # Matches passenger get on the coaster
+
+        if len(passCompleteMsgs[x]) > 1:  # exit more than once, fail
+            pretty(passCompleteMsgs[x], [])
+            print("Passenger", x, "exited more than once!")
+            exit(1)
+
+        elif len(passCompleteMsgs[x]) == 0:  # need exactly 1 complete message
+            badThreads.add(x)
+            # attempt to get iterations from the boarding messages
+            if len(passBoardMsgs[x]) != 0:
+                numIterations[x] = getIterSpec(passBoardMsgs[x][len(passBoardMsgs[x]) - 1])  # check last
+        else:
+            # attempt to get iterations from the exit messages
+            numIterations[x] = getIterNorm(passCompleteMsgs[x][0])
+
+        # if boarding doesn't match what you said you did
+        if len(passBoardMsgs[x]) != numIterations[x]:
+            badThreads.add(x)
+
+    for t in badThreads:
+        print("\nIssues with Passenger:", t, "-----")
+        if fixPassOut(t, numIterations[t]):
+            print("---- End Issues For Passenger:", t)
+            exit(1)
+
+        if fixPassEndOut(t, numIterations[t]):
+            print("---- End Issues For Passenger:", t)
+            exit(1)
+
+    # check the car output, if bad, we exit(1)
+    if fixCarOut():
+        exit(1)
+
+    # if no exit message.
+    if len(progEMsg) != 1:
+        # loosely find the exit message
+        progEMsg = re.findall("(.*shut.*\\.)", pout)
+        if len(progEMsg) == 0:
+            print("Missing:", progECorrect)
+        else:
+            print("Expected:", progECorrect, "\nGot:     ", progEMsg[0])
+        exit(1)
+
+    if len(badThreads) != 0:
+        exit(1)
+
+except subp.CalledProcessError as rProcess:  # returned process
+    # Process returned non-zero error code
+    if len(rProcess.stderr) != 0:
+        print("You wrote to stderr (2), you should be writing to stdout (0)\n",
+              "If you didnt write the following, then disregard this:",
+              rProcess.stderr)
+
+    if rProcess.returncode == -11:
+        print("Something has gone horribly wrong! (Probably a Segfault)")
+    else:
+        print("Unknown Signal Error Code: ", rProcess.returncode)
+
+    exit(1)
+
+except OSError as oErr:
+    print("File could not be read for testing ", filename, " :(")
+    exit(1)
+
+print("All test passed!")
+exit(0)

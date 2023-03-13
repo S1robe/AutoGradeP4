@@ -174,7 +174,7 @@ try:
 
 except subp.CalledProcessError as rProcess:  # returned process
     # Process returned non-zero error code
-    if len(rProcess.stderr) != 0:
+    if rProcess.stderr is not None:
         print("You wrote to stderr (2), you should be writing to stdout (0)\n",
               "If you didnt write the following, then disregard this:",
               rProcess.stderr)
